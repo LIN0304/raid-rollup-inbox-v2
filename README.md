@@ -9,18 +9,79 @@
 2. `safeHead`: Safe block promoted after the next Pre-Confer's Merkle proof verification.
 3. L2 Nodes only Derive/Execute the corresponding Blob after the `NewSafeHead` event occurs.
 
-## Security Improvements
+> For detailed timeline, refer to the diagram below and the implementation in the contracts.
+
+## Security Improvements & Issues Addressed
 
 This V2 implementation includes several critical security enhancements:
 
-- ✅ **Access Control**: Proper authorization checks on critical functions
-- ✅ **Reentrancy Protection**: Full protection against reentrancy attacks
-- ✅ **Slot Validation**: Ensures beacon slots follow an ascending order
-- ✅ **Blob Size Limits**: Prevents DoS attacks via oversized blobs
-- ✅ **Emergency Controls**: Pause mechanism for critical situations
-- ✅ **Default Penalty Mechanism**: Configurable slashing for defaulting preconfers
-- ✅ **Fee System**: Configurable publication fees to prevent spam
-- ✅ **Custom Errors**: Gas-efficient error handling with detailed information
+### 1. Access Control Vulnerabilities
+- **Problem**: The `slash()` function in `PreconfRegistry` was unprotected, allowing anyone to slash a preconfer's collateral.
+- **Solution**: Added the `onlyRaidInbox` modifier to restrict access to the authorized contract only.
+
+### 2. Reentrancy Vulnerabilities
+- **Problem**: Functions in `PreconfRegistry` that transfer ETH (`exit()`) were vulnerable to reentrancy attacks.
+- **Solution**: Added a nonReentrant modifier pattern to protect against reentrancy.
+
+### 3. Validator Proof Verification
+- **Problem**: The validator proof verification was marked as "optimistic" in comments and needed a full SSZ Merkle proof.
+- **Solution**: Enhanced the verification with proper error handling and sanity checks on proposer indexes.
+
+### 4. Missing Slot Validation
+- **Problem**: There was no check to ensure beacon slots follow an ascending order.
+- **Solution**: Added slot ordering validation in the `PublicationFeed` contract.
+
+### 5. Lack of Emergency Controls
+- **Problem**: No mechanism existed to pause the contract in case of critical issues.
+- **Solution**: Added admin-controlled pause functionality to the `RaidInbox` contract.
+
+### 6. Penalty Mechanism for Defaulting
+- **Problem**: The system lacked a penalty mechanism for defaulting preconfers.
+- **Solution**: Implemented a default tracking system that slashes after a configurable threshold is reached.
+
+### 7. No Blob Size Limits
+- **Problem**: Unbounded blob sizes could lead to denial of service or excessive gas costs.
+- **Solution**: Added a maximum blob size limit in `PublicationFeed`.
+
+### 8. Fee Management
+- **Problem**: No mechanism to prevent spam publications.
+- **Solution**: Added a configurable publication fee system.
+
+## Implementation Improvements
+
+### Custom Errors
+Replaced generic `require` statements with custom errors for:
+- Better gas efficiency
+- More detailed error information
+- Improved developer experience
+
+```solidity
+error NotPreconfer(address sender);
+
+function publish(...) external {
+    if (!registry.isActivePreconfer(msg.sender)) {
+        revert NotPreconfer(msg.sender);
+    }
+    // ...
+}
+```
+
+### Comprehensive Events
+Added detailed events for:
+- Administrative actions
+- State changes 
+- Threshold and parameter modifications
+
+```solidity
+event DefaultThresholdChanged(uint256 oldThreshold, uint256 newThreshold);
+event PreconferDefaulted(address preconfer, uint256 defaultCount);
+```
+
+### Configurable Parameters
+Made system parameters configurable by admin:
+- Default threshold before slashing
+- Slash amount per default
+- Publication fees
 
 ## Development Guide
 ```bash
@@ -43,14 +104,36 @@ export REPLACE_UNSAFE_HEAD=true
 npx hardhat run scripts/publishBlob.ts --network localhost
 ```
 
-## Security Considerations
+## Deployment Considerations
 
-For production deployments, it's recommended to:
+### Pre-Deployment Checklist
+1. **Auditing**: Have the contracts professionally audited before mainnet deployment
+2. **SSZ Implementation**: Replace the simplified Merkle proof verification with a complete SSZ implementation
+3. **Parameters**: Configure appropriate thresholds, collateral amounts, and fee structures for the target environment
+4. **Testing**: Perform extensive testnet testing before mainnet deployment
 
-1. Have the contracts professionally audited
-2. Replace the simplified Merkle proof verification with a complete SSZ implementation
-3. Configure appropriate thresholds, collateral amounts, and fee structures
-4. Perform extensive testnet testing before mainnet deployment
+### Post-Deployment Monitoring
+1. **Event Monitoring**: Set up monitoring for key events like `NewSafeHead`, `NewUnsafeHead`, and `Slashed`
+2. **Health Metrics**: Monitor:
+   - Time between unsafe and safe transitions
+   - Frequency of slashing events
+   - Preconfer registration/deregistration patterns
+   - Publication fees collected
+
+## Project Structure
+```
+raid-rollup-inbox-v2/
+├── contracts/
+│   ├── interfaces/        # Contract interfaces
+│   ├── utils/             # Utility libraries
+│   ├── validator/         # Validator proof verification
+│   ├── PublicationFeed.sol
+│   ├── PreconfRegistry.sol
+│   └── RaidInbox.sol
+├── scripts/               # Deployment and interaction scripts
+├── test/                  # Test suite
+└── docs/                  # Additional documentation
+```
 
 ---
 
